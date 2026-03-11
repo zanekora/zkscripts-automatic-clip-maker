@@ -1,0 +1,61 @@
+{
+  "paths": {
+    "input": "input",
+    "output": "output",
+    "review": "review",
+    "logs": "logs"
+  },
+  "ffmpeg": {
+    "ffmpeg_path": "ffmpeg",
+    "ffprobe_path": "ffprobe"
+  },
+  "export": {
+    "export_fight_clips": false,
+    "export_combined_video": false,
+    "fight_subdir_name": "fights",
+    "combined_filename": "combined_highlights.mp4",
+    "video_codec": "libx264",
+    "audio_codec": "aac",
+    "crf": 18,
+    "preset": "medium",
+    "transition_mode": "fade",
+    "transition_duration_seconds": 0.35
+  },
+  "analysis": {
+    "supported_extensions": [
+      ".mp4",
+      ".mkv",
+      ".mov",
+      ".avi",
+      ".m4v",
+      ".webm"
+    ],
+    "overlap_warning_min_seconds": 0.5,
+    "minimum_keep_segment_seconds": 45.0,
+    "merge_gap_seconds": 3.0,
+    "reuse_analysis_by_default": true,
+    "blackdetect": {
+      "enabled": true,
+      "min_duration": 0.75,
+      "pixel_threshold": 0.1,
+      "picture_threshold": 0.98
+    },
+    "scene_detection": {
+      "enabled": true,
+      "threshold": 27.0,
+      "min_scene_length_seconds": 2.0
+    },
+    "visual_cut_detection": {
+      "enabled": true,
+      "templates_dir": "presets/cut_templates",
+      "sample_interval_seconds": 0.2,
+      "template_similarity_threshold": 0.72,
+      "min_template_match_duration_seconds": 2.0,
+      "static_screen_enabled": true,
+      "static_motion_threshold": 4.5,
+      "static_edge_density_threshold": 0.06,
+      "static_text_like_threshold": 0.015,
+      "min_static_duration_seconds": 1.5
+    }
+  }
+}
