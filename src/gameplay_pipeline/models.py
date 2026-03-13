@@ -15,6 +15,7 @@ class BlackdetectConfig:
 @dataclass(slots=True)
 class AnalysisConfig:
     supported_extensions: tuple[str, ...]
+    segmentation_mode: str
     overlap_warning_min_seconds: float
     minimum_keep_segment_seconds: float
     merge_gap_seconds: float
@@ -22,6 +23,7 @@ class AnalysisConfig:
     blackdetect: BlackdetectConfig
     scene_detection: "SceneDetectionConfig"
     visual_cut_detection: "VisualCutDetectionConfig"
+    active_fight_detection: "ActiveFightDetectionConfig"
 
 
 @dataclass(slots=True)
@@ -34,15 +36,57 @@ class SceneDetectionConfig:
 @dataclass(slots=True)
 class VisualCutDetectionConfig:
     enabled: bool = True
-    templates_dir: str = "presets/cut_templates"
+    fullscreen_templates_dir: str = "presets/fullscreen_templates"
+    partial_templates_dir: str = "presets/partial_templates"
+    terminal_templates_dir: str = "presets/terminal_templates"
+    cut_weight: float = 1.0
+    terminal_cut_weight: float = 1.15
     sample_interval_seconds: float = 0.5
     template_similarity_threshold: float = 0.85
     min_template_match_duration_seconds: float = 2.0
+    template_only_cut_requires_static: bool = True
+    unscoped_template_enabled: bool = False
+    small_template_late_match_enabled: bool = True
+    small_template_max_coverage: float = 0.12
+    small_template_extra_similarity: float = 0.05
+    sticky_region_match_enabled: bool = True
+    sticky_region_min_consecutive_hits: int = 2
+    sticky_region_release_seconds: float = 1.5
+    flash_transition_enabled: bool = True
+    flash_brightness_delta_threshold: float = 35.0
+    flash_changed_pixel_ratio_threshold: float = 0.45
+    flash_bright_pixel_ratio_threshold: float = 0.45
+    flash_follow_window_seconds: float = 2.0
+    flash_terminal_tail_enabled: bool = True
+    terminal_region_detector_enabled: bool = True
+    terminal_region_start_fraction: float = 0.7
+    terminal_region_min_template_hits: int = 2
+    terminal_template_min_unique_matches: int = 2
+    terminal_large_template_min_coverage: float = 0.08
+    terminal_region_edge_density_threshold: float = 0.05
+    terminal_region_text_like_threshold: float = 0.012
+    terminal_region_min_duration_seconds: float = 1.0
     static_screen_enabled: bool = True
     static_motion_threshold: float = 3.0
     static_edge_density_threshold: float = 0.09
     static_text_like_threshold: float = 0.025
     min_static_duration_seconds: float = 3.0
+
+
+@dataclass(slots=True)
+class ActiveFightDetectionConfig:
+    enabled: bool = True
+    templates_dir: str = "presets/infight_templates"
+    protection_weight: float = 1.25
+    sample_interval_seconds: float = 0.2
+    similarity_threshold: float = 0.78
+    min_match_duration_seconds: float = 1.0
+    leading_keep_seconds: float = 0.5
+    trailing_keep_seconds: float = 1.5
+    min_consecutive_hits: int = 2
+    release_after_misses: int = 3
+    require_dynamic_frame: bool = True
+    max_static_changed_pixel_ratio: float = 0.10
 
 
 @dataclass(slots=True)
@@ -94,9 +138,11 @@ class ClipInfo:
     estimated_end_iso: Optional[str]
     file_signature: str = ""
     black_segments: list[BlackSegment] = field(default_factory=list)
+    active_fight_segments: list["DetectedSegment"] = field(default_factory=list)
     cut_segments: list["DetectedSegment"] = field(default_factory=list)
     scene_segments: list["SceneSegment"] = field(default_factory=list)
     keep_segments: list["KeepSegment"] = field(default_factory=list)
+    debug_notes: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
 

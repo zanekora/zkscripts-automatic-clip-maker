@@ -10,6 +10,8 @@ from .models import ClipInfo, Report
 
 
 def write_json_report(report: Report, output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
     def default_serializer(value: Any) -> Any:
         if is_dataclass(value):
             return asdict(value)
@@ -22,6 +24,8 @@ def write_json_report(report: Report, output_path: Path) -> None:
 
 
 def write_csv_summary(clips: list[ClipInfo], output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
     with output_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow(
@@ -34,6 +38,7 @@ def write_csv_summary(clips: list[ClipInfo], output_path: Path) -> None:
                 "estimated_start_iso",
                 "estimated_end_iso",
                 "black_segment_count",
+                "active_fight_segment_count",
                 "cut_segment_count",
                 "scene_segment_count",
                 "keep_segment_count",
@@ -55,6 +60,7 @@ def write_csv_summary(clips: list[ClipInfo], output_path: Path) -> None:
                     clip.estimated_start_iso,
                     "" if clip.estimated_end_iso is None else clip.estimated_end_iso,
                     len(clip.black_segments),
+                    len(clip.active_fight_segments),
                     len(clip.cut_segments),
                     len(clip.scene_segments),
                     len(clip.keep_segments),
@@ -64,6 +70,8 @@ def write_csv_summary(clips: list[ClipInfo], output_path: Path) -> None:
 
 
 def write_markdown_report(report: Report, output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
     lines: list[str] = [
         "# Gameplay Review Report",
         "",
@@ -99,6 +107,7 @@ def write_markdown_report(report: Report, output_path: Path) -> None:
                     f"- Estimated start: `{clip.estimated_start_iso}`",
                     f"- Estimated end: `{clip.estimated_end_iso}`",
                     f"- Black/dead-space candidates: `{len(clip.black_segments)}`",
+                    f"- Active fight matches: `{len(clip.active_fight_segments)}`",
                     f"- Visual cut matches: `{len(clip.cut_segments)}`",
                     f"- Scene segments: `{len(clip.scene_segments)}`",
                     f"- Candidate keep segments: `{len(clip.keep_segments)}`",
@@ -124,6 +133,15 @@ def write_markdown_report(report: Report, output_path: Path) -> None:
                     )
                 lines.append("")
 
+            if clip.active_fight_segments:
+                lines.append("#### Active Fight Matches")
+                lines.append("")
+                for segment in clip.active_fight_segments:
+                    lines.append(
+                        f"- start `{segment.start:.3f}s`, end `{segment.end:.3f}s`, duration `{segment.duration:.3f}s`, label `{segment.label}`"
+                    )
+                lines.append("")
+
             if clip.cut_segments:
                 lines.append("#### Visual Cut Matches")
                 lines.append("")
@@ -140,6 +158,13 @@ def write_markdown_report(report: Report, output_path: Path) -> None:
                     lines.append(
                         f"- keep `{segment.start:.3f}s` to `{segment.end:.3f}s` (`{segment.duration:.3f}s`) because {segment.reason}"
                     )
+                lines.append("")
+
+            if clip.debug_notes:
+                lines.append("#### Debug Notes")
+                lines.append("")
+                for note in clip.debug_notes:
+                    lines.append(f"- {note}")
                 lines.append("")
 
             if clip.warnings:
@@ -171,6 +196,15 @@ def write_markdown_report(report: Report, output_path: Path) -> None:
             if not clip.black_segments:
                 continue
             lines.append(f"- `{clip.name}`: `{len(clip.black_segments)}` candidate segment(s)")
+
+    lines.extend(["", "## Active Fight Matches", ""])
+    if not any(clip.active_fight_segments for clip in report.clips):
+        lines.append("No active fight matches detected.")
+    else:
+        for clip in report.clips:
+            if not clip.active_fight_segments:
+                continue
+            lines.append(f"- `{clip.name}`: `{len(clip.active_fight_segments)}` matched segment(s)")
 
     lines.extend(["", "## Visual Cut Matches", ""])
     if not any(clip.cut_segments for clip in report.clips):

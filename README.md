@@ -14,12 +14,14 @@ This project is currently **alpha**. It is intended for real local use, but the 
 - Flags likely overlap windows using estimated start/end timestamps
 - Runs `ffmpeg` `blackdetect` to find likely black or dead-space segments
 - Runs PySceneDetect content analysis to split clips into scene ranges
-- Optionally matches reference cut templates from `presets/cut_templates/`
+- Optionally matches reference templates from organized preset folders
 - Optionally blocks static, text-heavy menu-style screens
 - Reuses cached analysis for unchanged clips by default
-- Generates longer candidate keep segments by removing blocked ranges and merging nearby gameplay spans
+- Generates candidate keep segments by removing blocked ranges while preserving detected cut boundaries
+- Uses sequential sampled frame scanning for visual-cut analysis to reduce repeated seek overhead
 - Optionally exports each candidate keep segment as its own fight clip
 - Optionally exports one combined highlight video from the fight clips
+- Supports multiple fight segments coming from a single source clip when the analysis detects separate keep ranges
 - Writes JSON, CSV, and Markdown review outputs
 - Logs to console and file
 - Keeps processing non-destructive
@@ -125,6 +127,7 @@ Defaults live in [config/defaults.json](config/defaults.json). You can override 
 
 Key current tuning knobs:
 
+- `analysis.segmentation_mode`
 - `analysis.blackdetect.*`
 - `analysis.scene_detection.threshold`
 - `analysis.scene_detection.min_scene_length_seconds`
@@ -144,7 +147,7 @@ These visual-cut settings control how aggressively the tool removes non-fight fo
 
 What it does:
 
-- Controls how closely a video frame must match one of your reference images in `presets/cut_templates/` before that span is marked for removal.
+- Controls how closely a video frame must match one of your reference images before that span is marked for removal.
 
 How to think about it:
 
@@ -249,7 +252,10 @@ Relevant knobs:
 
 - `--flash-brightness-threshold`
 - `--flash-change-threshold`
+- `--flash-bright-pixel-threshold`
 - `--flash-follow-window`
+- `--terminal-region-start-fraction`
+- `--terminal-region-min-template-hits`
 
 How it works:
 
@@ -262,6 +268,8 @@ This is useful for:
 - win/lose transitions
 - result-card reveals
 - sudden end-of-match flashes
+
+To avoid treating bright skill effects as end transitions, the flash detector now also requires a large fraction of bright pixels across the frame.
 
 Default behavior also supports a flash-to-tail handoff:
 
@@ -277,6 +285,15 @@ This helps when:
 - the result UI appears in a stable region
 - but the rest of the screen is still animated
 - and exact per-frame template matching is too fragile
+
+This detector now requires repeated template confirmation in a region before it starts treating that region as a terminal-state anchor, to reduce false positives.
+If cuts are happening too early, the first terminal-state knobs to raise are:
+
+- `--terminal-region-start-fraction`
+- `--terminal-region-min-template-hits`
+
+When a terminal region is confirmed late in the clip, the detector can now cut from the earliest confirmed late terminal-state signal through the end of the clip.
+To avoid premature trimming, terminal tail cuts are also snapped conservatively to a late scene boundary near the end of the clip.
 
 ## Practical Tuning Advice
 
@@ -303,22 +320,88 @@ Recommended workflow:
 
 1. Run with defaults.
 2. Review `review/review_report.md`.
-3. Add or improve reference images in `presets/cut_templates/`.
+3. Add or improve reference images in `presets/fullscreen_templates/`, `presets/partial_templates/`, or `presets/terminal_templates/`.
 4. Change one or two thresholds at a time.
 5. Re-run with cache reuse on unless you need a full refresh.
 
-## Cut Templates
+## Segmentation Modes
 
-If you want the tool to learn what should be cut, place representative screenshots in:
+The tool supports three segmentation strategies:
 
-```text
-presets/cut_templates/
+- `hybrid`
+  uses both cut detection and active-fight detection, with active-fight ranges protecting gameplay from being cut while the in-match UI is still visible
+- `cut_only`
+  only uses blocked/cut signals
+- `fight_only`
+  only keeps footage while active-fight templates are visible, without snapping back to the full surrounding scene
+
+By default, `hybrid` now favors active-fight evidence over generic cut evidence so a stable in-match HUD signal, such as a top-center timer, is less likely to be cut away by a weak or noisy cut template. Terminal/end-card cuts still have a stronger late-clip path.
+
+If needed, these priorities can be adjusted through config or CLI:
+
+- `analysis.active_fight_detection.protection_weight`
+- `analysis.visual_cut_detection.cut_weight`
+- `analysis.visual_cut_detection.terminal_cut_weight`
+- `--active-fight-weight`
+- `--cut-weight`
+- `--terminal-cut-weight`
+
+Example `fight_only` run:
+
+```powershell
+python -m src.main `
+  --input input `
+  --output output `
+  --review review `
+  --logs logs `
+  --segmentation-mode fight_only `
+  --active-fight-templates presets\infight_templates
 ```
 
-Backward compatibility:
+Useful `fight_only` tuning knobs:
 
-- `presets/cut_templates/` is the preferred folder
-- `presets/loading_templates/` is still scanned for older template sets
+- `--active-fight-similarity-threshold`
+- `--active-fight-leading-keep`
+- `--active-fight-trailing-keep`
+
+The active-fight matcher now also uses consecutive-hit confirmation and can reject frames that look too static, which helps timer/HUD templates avoid matching the whole clip by accident.
+
+## Cut Templates
+
+For the clearest setup, sort representative screenshots into:
+
+```text
+presets/fullscreen_templates/
+presets/partial_templates/
+presets/terminal_templates/
+presets/active_fight_templates/
+```
+
+Recommended meaning:
+
+- `fullscreen_templates`
+  full-screen loading, queue, menu, or scoreboard states
+- `partial_templates`
+  cropped UI indicators that imply a non-fight state
+- `terminal_templates`
+  end-of-match or result-state UI that should cut the tail of the clip
+- `active_fight_templates`
+  positive in-match signals that should help preserve gameplay while they are visible, such as a round timer or fight HUD element
+
+If you have templates that specifically represent end-of-match or result-state UI, place them in:
+
+```text
+presets/terminal_templates/
+```
+
+Templates in `terminal_templates` are treated as higher-confidence late end-state signals.
+For a terminal tail cut to trigger, the detector now prefers either:
+
+- multiple distinct terminal templates agreeing late in the clip
+- or one larger terminal template with strong late confirmation
+
+Small terminal snippets like a short word or icon can still help, but they are treated as supporting signals. Larger result-card templates are preferred as the decisive end-state trigger.
+The same region-prefix and transparent-PNG masking concepts also apply to active fight templates, which helps small timer or HUD snippets remain stable enough to act as keep signals.
 
 Supported image types:
 
@@ -330,6 +413,9 @@ The tool will sample frames from each clip and mark spans that closely match tho
 It will also cut static, text-heavy menu-like spans using configurable heuristics.
 
 Full-screen screenshots and smaller UI-element screenshots are both supported. Partial templates are matched as on-screen indicators, not only as full-frame replacements.
+By default, plain template matches only become cuts if the frame also looks static/menu-like, which helps prevent bad-screen templates from cutting live gameplay during combat.
+Small templates can still contribute to late end-state detection near the end of a clip when they match with stronger confidence, which helps short text snippets like result labels remain useful.
+By default, templates without a region prefix are treated conservatively and are not used as general-purpose cut triggers. Region-hinted templates such as `br_...`, `bc_...`, or `tr_...` are preferred.
 Transparent PNG templates are also supported, so you can mask out changing areas like player names while keeping stable UI elements.
 You can optionally scope a template to a likely screen region by naming it with a prefix such as:
 
@@ -414,11 +500,23 @@ output/_in_progress/
 ```
 
 Those are early review artifacts. The final end-of-run outputs are still written to the normal output locations and should converge to the same result as standard batch mode.
+The log will now state either:
 
-Use a custom cut-template folder:
+- `Wrote X provisional fight clip(s) ...`
+- or `No provisional keep segments ...`
+
+Use custom template folders:
 
 ```powershell
-python -m src.main --input input --output output --review review --logs logs --cut-templates presets\cut_templates
+python -m src.main `
+  --input input `
+  --output output `
+  --review review `
+  --logs logs `
+  --cut-templates presets\fullscreen_templates `
+  --partial-templates presets\partial_templates `
+  --terminal-templates presets\terminal_templates `
+  --active-fight-templates presets\active_fight_templates
 ```
 
 Disable heavier analysis passes if needed:
@@ -478,12 +576,16 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE).
 
 This project is provided open source, as-is, with no guarantee of support, maintenance, updates, or responsiveness.
 
+It was built primarily for the author's own workflow and personal use. If it happens to be useful to someone else, great, but you should not expect direct support.
+
 You may use, modify, and distribute it under the terms of the license, but you should assume:
 
 - no formal support
 - no service-level commitment
 - no guarantee of future fixes or feature work
 - no warranty beyond the MIT license terms
+
+If you publish modified versions or reuse substantial parts of the code, source credit is appreciated, although the MIT license ultimately governs what you are allowed to do.
 
 ## Outputs
 

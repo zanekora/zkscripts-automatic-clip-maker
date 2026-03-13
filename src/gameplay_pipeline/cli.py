@@ -88,17 +88,26 @@ def export_partial_clip_outputs(
     output_dir: Path,
     ffmpeg_path: str,
     export_config,
-) -> None:
+) -> int:
     if not current_clip.keep_segments:
-        return
+        logging.info("No provisional keep segments for %s", current_clip.name)
+        return 0
 
     preview_output_dir = output_dir / "_in_progress"
-    export_fight_clips(
+    preview_output_dir.mkdir(parents=True, exist_ok=True)
+    exported = export_fight_clips(
         ffmpeg_path=ffmpeg_path,
         clips=[current_clip],
         output_dir=preview_output_dir,
         export_config=export_config,
     )
+    logging.info(
+        "Wrote %d provisional fight clip(s) for %s to %s",
+        len(exported),
+        current_clip.name,
+        preview_output_dir / export_config.fight_subdir_name,
+    )
+    return len(exported)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -144,6 +153,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Disable visual cut detection for this run.",
     )
     parser.add_argument(
+        "--segmentation-mode",
+        choices=["hybrid", "cut_only", "fight_only"],
+        help="Choose whether to segment by cut detection, active-fight detection, or both.",
+    )
+    parser.add_argument(
         "--scene-threshold",
         type=float,
         help="Override PySceneDetect content threshold.",
@@ -167,7 +181,40 @@ def build_parser() -> argparse.ArgumentParser:
         "--cut-templates",
         "--loading-templates",
         dest="cut_templates",
-        help="Folder of reference images used to identify spans that should be cut.",
+        help="Override the fullscreen template folder.",
+    )
+    parser.add_argument(
+        "--partial-templates",
+        help="Override the partial template folder.",
+    )
+    parser.add_argument(
+        "--terminal-templates",
+        help="Override the terminal template folder.",
+    )
+    parser.add_argument(
+        "--active-fight-templates",
+        "--infight-templates",
+        help="Override the active-fight template folder.",
+    )
+    parser.add_argument(
+        "--active-fight-similarity-threshold",
+        type=float,
+        help="Similarity threshold for active-fight template matching.",
+    )
+    parser.add_argument(
+        "--active-fight-weight",
+        type=float,
+        help="Relative priority of active-fight templates versus cut detections in hybrid mode.",
+    )
+    parser.add_argument(
+        "--active-fight-leading-keep",
+        type=float,
+        help="Seconds to keep before an active-fight match begins.",
+    )
+    parser.add_argument(
+        "--active-fight-trailing-keep",
+        type=float,
+        help="Seconds to keep after an active-fight match ends.",
     )
     parser.add_argument(
         "--template-similarity-threshold",
@@ -175,6 +222,16 @@ def build_parser() -> argparse.ArgumentParser:
         dest="template_similarity_threshold",
         type=float,
         help="Template similarity threshold for reference-image matching.",
+    )
+    parser.add_argument(
+        "--cut-weight",
+        type=float,
+        help="Relative priority of generic cut detections in hybrid mode.",
+    )
+    parser.add_argument(
+        "--terminal-cut-weight",
+        type=float,
+        help="Relative priority of terminal/end-card cut detections in hybrid mode.",
     )
     parser.add_argument(
         "--static-motion-threshold",
@@ -195,6 +252,36 @@ def build_parser() -> argparse.ArgumentParser:
         "--min-static-duration",
         type=float,
         help="Minimum duration for static/text-heavy segments to be cut.",
+    )
+    parser.add_argument(
+        "--flash-brightness-threshold",
+        type=float,
+        help="Brightness delta threshold for sudden flash-transition detection.",
+    )
+    parser.add_argument(
+        "--flash-change-threshold",
+        type=float,
+        help="Changed-pixel ratio threshold for sudden flash-transition detection.",
+    )
+    parser.add_argument(
+        "--flash-bright-pixel-threshold",
+        type=float,
+        help="Require at least this fraction of bright pixels for a flash to count as a transition.",
+    )
+    parser.add_argument(
+        "--flash-follow-window",
+        type=float,
+        help="How long after a flash the tool should watch for a result/menu state and then cut from the flash onward.",
+    )
+    parser.add_argument(
+        "--terminal-region-start-fraction",
+        type=float,
+        help="Only allow late terminal-region detection after this fraction of the clip duration.",
+    )
+    parser.add_argument(
+        "--terminal-region-min-template-hits",
+        type=int,
+        help="Require at least this many late template hits in a region before terminal-region blocking activates.",
     )
     parser.add_argument(
         "--reprocess-mode",
@@ -271,6 +358,8 @@ def main() -> int:
         app_config.analysis.scene_detection.enabled = False
     if args.skip_visual_cut_detection:
         app_config.analysis.visual_cut_detection.enabled = False
+    if args.segmentation_mode:
+        app_config.analysis.segmentation_mode = args.segmentation_mode
     if args.scene_threshold is not None:
         app_config.analysis.scene_detection.threshold = args.scene_threshold
     if args.min_scene_length is not None:
@@ -280,9 +369,27 @@ def main() -> int:
     if args.merge_gap_seconds is not None:
         app_config.analysis.merge_gap_seconds = args.merge_gap_seconds
     if args.cut_templates:
-        app_config.analysis.visual_cut_detection.templates_dir = args.cut_templates
+        app_config.analysis.visual_cut_detection.fullscreen_templates_dir = args.cut_templates
+    if args.partial_templates:
+        app_config.analysis.visual_cut_detection.partial_templates_dir = args.partial_templates
+    if args.terminal_templates:
+        app_config.analysis.visual_cut_detection.terminal_templates_dir = args.terminal_templates
+    if args.active_fight_templates:
+        app_config.analysis.active_fight_detection.templates_dir = args.active_fight_templates
+    if args.active_fight_similarity_threshold is not None:
+        app_config.analysis.active_fight_detection.similarity_threshold = args.active_fight_similarity_threshold
+    if args.active_fight_weight is not None:
+        app_config.analysis.active_fight_detection.protection_weight = args.active_fight_weight
+    if args.active_fight_leading_keep is not None:
+        app_config.analysis.active_fight_detection.leading_keep_seconds = args.active_fight_leading_keep
+    if args.active_fight_trailing_keep is not None:
+        app_config.analysis.active_fight_detection.trailing_keep_seconds = args.active_fight_trailing_keep
     if args.template_similarity_threshold is not None:
         app_config.analysis.visual_cut_detection.template_similarity_threshold = args.template_similarity_threshold
+    if args.cut_weight is not None:
+        app_config.analysis.visual_cut_detection.cut_weight = args.cut_weight
+    if args.terminal_cut_weight is not None:
+        app_config.analysis.visual_cut_detection.terminal_cut_weight = args.terminal_cut_weight
     if args.static_motion_threshold is not None:
         app_config.analysis.visual_cut_detection.static_motion_threshold = args.static_motion_threshold
     if args.static_edge_threshold is not None:
@@ -291,6 +398,22 @@ def main() -> int:
         app_config.analysis.visual_cut_detection.static_text_like_threshold = args.static_text_threshold
     if args.min_static_duration is not None:
         app_config.analysis.visual_cut_detection.min_static_duration_seconds = args.min_static_duration
+    if args.flash_brightness_threshold is not None:
+        app_config.analysis.visual_cut_detection.flash_brightness_delta_threshold = args.flash_brightness_threshold
+    if args.flash_change_threshold is not None:
+        app_config.analysis.visual_cut_detection.flash_changed_pixel_ratio_threshold = args.flash_change_threshold
+    if args.flash_bright_pixel_threshold is not None:
+        app_config.analysis.visual_cut_detection.flash_bright_pixel_ratio_threshold = args.flash_bright_pixel_threshold
+    if args.flash_follow_window is not None:
+        app_config.analysis.visual_cut_detection.flash_follow_window_seconds = args.flash_follow_window
+    if args.terminal_region_start_fraction is not None:
+        app_config.analysis.visual_cut_detection.terminal_region_start_fraction = args.terminal_region_start_fraction
+    if args.terminal_region_min_template_hits is not None:
+        app_config.analysis.visual_cut_detection.terminal_region_min_template_hits = args.terminal_region_min_template_hits
+    if app_config.analysis.segmentation_mode == "fight_only":
+        app_config.analysis.visual_cut_detection.enabled = False
+    elif app_config.analysis.segmentation_mode == "cut_only":
+        app_config.analysis.active_fight_detection.enabled = False
     if args.export_fights:
         app_config.export.export_fight_clips = True
     if args.export_combined:

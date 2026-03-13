@@ -6,6 +6,10 @@ This guide covers the next practical steps to get the workflow running on a Wind
 
 The current workflow is a non-destructive analysis and export pipeline. It does not trim, rewrite, or delete the original clips. It scans raw gameplay files, extracts metadata, flags likely overlaps, detects black/dead-space candidates, detects scene boundaries, optionally matches reference cut templates, applies static/text-heavy menu heuristics, and generates candidate keep segments for manual editing follow-up or optional exports.
 
+This tool was built primarily for the author's own use. Others are welcome to use or adapt it, but there is no formal support commitment.
+
+If you publish modified versions or reuse substantial parts publicly, source credit is appreciated, although the license allows broad reuse.
+
 The defaults are currently tuned on the aggressive side for gameplay footage where loading, queue, and results screens should be removed quickly.
 
 It can now also optionally create new exported media files:
@@ -28,6 +32,12 @@ Implemented now:
 - candidate keep-segment generation
 - optional per-fight clip export
 - optional combined highlight export
+- support for multiple detected fight segments within a single source clip
+- selectable segmentation modes: hybrid, cut_only, fight_only
+- fight_only mode now preserves the active-fight template ranges directly instead of expanding back to the whole scene
+- active-fight detection threshold and keep-window controls for fight_only workflows
+- hybrid mode now lets active-fight ranges protect gameplay from overlapping cut spans
+- active-fight detection now uses consecutive-hit confirmation and optional dynamic-frame gating
 - JSON, CSV, Markdown, and log outputs
 - Windows PowerShell helper scripts
 
@@ -66,7 +76,7 @@ If `ffmpeg` or `ffprobe` are missing, install a local FFmpeg build and either:
 From the project root:
 
 ```powershell
-cd "C:\Program Files\Blackmagic Design\DaVinci Resolve\gameplay-highlight-pipeline"
+cd "C:\path\to\gameplay-highlight-pipeline"
 .\scripts\setup_env.ps1
 .\.venv\Scripts\Activate.ps1
 ```
@@ -91,11 +101,37 @@ Use real samples that reflect your normal recording pattern:
 - clips with probable overlap
 - clips containing loading or dead-space moments
 
-If you have representative screenshots of screens that should be cut, place them in:
+If you have representative screenshots of screens that should be cut, sort them into:
 
 ```text
-presets\cut_templates\
+presets\fullscreen_templates\
+presets\partial_templates\
+presets\terminal_templates\
+presets\active_fight_templates\
 ```
+
+Recommended use:
+
+- `fullscreen_templates`
+  whole screens such as loading, matchmaking, queue, menu, or scoreboard states
+- `partial_templates`
+  cropped UI fragments or icons that indicate a non-fight state
+- `terminal_templates`
+  strong end-of-match signals such as result cards, victory/defeat banners, continue prompts, or post-match summary panels
+- `active_fight_templates`
+  positive in-match signals such as round timers or fight HUD elements that should help preserve gameplay while they are visible
+
+For small in-fight UI snippets such as timers, use region-prefixed or masked images where possible. The active-fight matcher now benefits from the same region-aware and masked matching concepts as the cut detector.
+
+If you have templates that specifically mean "the match is over" or "we are now on the result screen", put those in:
+
+```text
+presets\terminal_templates\
+```
+
+Those templates are treated as stronger late end-state indicators than general cut templates.
+Late terminal tail cuts are intentionally conservative and prefer either multiple distinct terminal-template confirmations or one larger, stronger terminal template.
+In practice, larger result-card templates are more reliable than very small snippets on their own.
 
 You can mix:
 
@@ -133,6 +169,10 @@ If template matching still misses too much, the first useful adjustments are usu
 - lower `--template-similarity-threshold`
 - lower the sample interval in config so frames are checked more often
 - add a few more screenshots of the exact non-fight states that survived
+
+By default, generic template matches are kept conservative and are expected to work together with static/text-heavy or anchored-region signals, rather than cutting purely on visual similarity alone.
+Smaller templates can still help late-clip end-state detection when they match strongly enough near the end of a clip.
+Region-hinted templates are preferred. Unscoped templates are intentionally conservative because they are more likely to create false positives during live gameplay.
 
 ### 4. Run the first analysis
 
@@ -183,6 +223,23 @@ What those mean:
 - `--min-static-duration 2.5`
   cuts static/text-heavy spans once they persist for at least 2.5 seconds
 
+The visual-cut system can also detect sudden flash transitions leading into result or menu screens. If your game uses a sharp flash before the end screen appears, this can help the tool cut from the transition itself rather than from the first stable UI frame.
+
+Flash detection is intended to behave like a true transition detector, not just a "big effect happened" detector. It now also checks how much of the frame became bright, which helps reject many flashy combat skills.
+
+When the follow-up UI signal is strong enough, the default behavior can also hold that cut through the rest of the post-match tail instead of letting the winner animation slip back into the export.
+
+The visual-cut system can also use late-clip anchored region heuristics, which are especially useful when a bottom-right or bottom-center result panel appears during an animated win/lose sequence.
+
+Those anchored-region heuristics are intentionally gated by repeated template confirmation so that unrelated region hints in other templates do not over-block the clip.
+If the end screen is being cut too early, make terminal detection more conservative by:
+
+- raising `--terminal-region-start-fraction`
+- raising `--terminal-region-min-template-hits`
+
+If a late anchored result UI is confirmed strongly enough, the detector can also block from that late confirmation point through the end of the clip.
+To reduce premature trimming, terminal tail cuts are aligned conservatively to a late scene boundary near the end of the clip.
+
 Force a full refresh instead of reusing cache:
 
 ```powershell
@@ -228,6 +285,7 @@ Check:
 Use the Markdown report for a fast human pass. Use the JSON and CSV outputs if you want to feed later steps or build companion tooling.
 The pipeline also keeps a reusable analysis cache in `intermediate\analysis_cache.json` by default.
 When `--clip-at-a-time` is enabled, partial reports are overwritten during the run so you can inspect progress before the batch finishes.
+The run log should also explicitly tell you whether a clip produced a provisional export or had no provisional keep segments.
 
 ### 6. Validate the heuristics against real footage
 
@@ -250,6 +308,16 @@ Best next implementation order:
 2. Improve cut-template coverage and static/text-heavy menu detection with better tuning or additional heuristics.
 3. Export review sidecars that are easier to consume in Resolve.
 4. Add tests before the pipeline starts making editing decisions.
+
+## Potential Features
+
+Possible future features that are not implemented yet:
+
+1. Lower-filesize export modes for easier sharing and upload.
+2. Named quality/sensitivity presets.
+3. Resolve-side timeline or marker export.
+4. OCR-assisted text detection.
+5. Portable packaged user build with a lightweight GUI.
 
 ## Deployment Model
 

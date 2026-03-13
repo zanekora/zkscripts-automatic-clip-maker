@@ -24,12 +24,14 @@ def _clip_from_dict(payload: dict[str, Any]) -> ClipInfo:
         estimated_end_iso=payload.get("estimated_end_iso"),
         file_signature=str(payload.get("file_signature", "")),
         black_segments=[BlackSegment(**item) for item in payload.get("black_segments", [])],
+        active_fight_segments=[DetectedSegment(**item) for item in payload.get("active_fight_segments", [])],
         cut_segments=[
             DetectedSegment(**item)
             for item in payload.get("cut_segments", payload.get("loading_segments", []))
         ],
         scene_segments=[SceneSegment(**item) for item in payload.get("scene_segments", [])],
         keep_segments=[KeepSegment(**item) for item in payload.get("keep_segments", [])],
+        debug_notes=[str(item) for item in payload.get("debug_notes", [])],
         warnings=[str(item) for item in payload.get("warnings", [])],
     )
 

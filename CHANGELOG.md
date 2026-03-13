@@ -19,6 +19,30 @@
 - Added flash-transition detection so abrupt win/lose transitions can start a cut before the result UI fully settles.
 - Added flash-to-terminal-tail behavior so a result-card signal after a flash can block the rest of the post-match animation.
 - Added late-clip anchored region detection for result-card style UI that appears during animated post-match sequences.
+- Removed legacy template-folder compatibility in favor of the explicit fullscreen / partial / terminal folder model.
+- Restricted terminal-region blocking so it only activates for regions with repeated late template confirmation, reducing false positives.
+- Tightened flash detection so bright skill effects are less likely to be mistaken for full-screen end transitions.
+- Made plain template-only cuts require static/menu-like context by default, reducing false positives during live combat.
+- Added a late-match fallback for small templates so short end-state UI snippets can still trigger cuts near the end of a clip.
+- Added terminal tail blocking from the earliest confirmed late end-state region so confirmed result cards can cut the rest of the clip.
+- Disabled unscoped templates as default general-purpose cut triggers to reduce false mid-fight splits.
+- Added `presets/terminal_templates` so end-state UI templates can be treated separately from general cut templates.
+- Added `presets/fullscreen_templates` and `presets/partial_templates` so end users can organize reference images by signal type.
+- Added `presets/active_fight_templates` so in-match UI signals can help preserve gameplay ranges.
+- Improved active-fight template matching with region-aware, edge-based, and masked-template support.
+- Added explicit segmentation modes: `hybrid`, `cut_only`, and `fight_only`.
+- Made terminal tail cuts require stronger terminal-template confirmation, reducing the chance that one weak snippet drives the whole tail cut.
+- Reduced the influence of tiny terminal snippets so larger end-card templates are favored for decisive tail cuts.
+- Switched visual-cut analysis to sequential sampled frame scanning for better runtime performance.
+- Aligned terminal tail cuts conservatively to a late scene boundary near clip end to reduce early trim points.
+- Fixed cut-range merging so terminal tail detections no longer inherit an earlier start time from generic template matches.
+- Fixed keep-segment generation so detected cut spans are no longer merged back into one continuous export.
+- Hardened active-fight scoring so non-finite OpenCV match results no longer extend active keep ranges.
+- Made any cut span that reaches clip end anchor to the final detected scene start so hybrid mode can still remove the post-fight tail when active-fight matching overextends.
+- Added automatic foreground-mask derivation for opaque template screenshots, so users do not need to hand-edit transparency just to ignore changing background behind UI elements.
+- Narrowed the forced tail-cut safeguard so hybrid mode no longer overrides overlapping active-fight evidence at clip end.
+- Tightened active-fight matching so region-prefixed positive HUD templates use narrower semantic search windows and anchored local tracking instead of roaming broadly across the frame.
+- Added anchor-aware merging for active-fight segments and a late-gap bridge in hybrid keep generation so brief detector dropouts near clip end do not cut a fight prematurely.
 - Added reusable per-file analysis caching and `--reprocess-mode`.
 - Changed keep-segment generation to build longer contiguous gameplay spans instead of tiny scene fragments.
 - Added `--clip-at-a-time` for partial reports and provisional early exports.

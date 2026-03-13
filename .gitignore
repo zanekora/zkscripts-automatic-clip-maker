@@ -14,14 +14,20 @@ venv/
 # Runtime media, reports, logs, and generated exports should not be committed.
 input/*
 !input/.gitkeep
+input_*/*
 intermediate/*
 !intermediate/.gitkeep
 output/*
 !output/.gitkeep
+output_*/*
 review/*
 !review/.gitkeep
+review_*/*
 logs/*
 !logs/.gitkeep
+logs_*/*
+.temp/
+review_candidate/
 
 # OS/editor
 .DS_Store
